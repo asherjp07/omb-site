@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>OMB Creator Console</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  .row { display:flex; gap:16px; flex-wrap:wrap; align-items:center; }
+  .btn { background:var(--gold); color:#111; border:0; border-radius:8px; padding:12px 18px; font-weight:700; cursor:pointer; font-size:1rem; }
+  .btn.alt { background:transparent; color:var(--gold); border:1px solid var(--gold); }
+  .btn:disabled { opacity:.4; cursor:not-allowed; }
+  .avatar { width:48px; height:48px; border-radius:50%; border:2px solid var(--gold); }
+  label { display:block; margin:14px 0 6px; font-weight:600; }
+  select, textarea { width:100%; background:#1c1c1c; color:var(--text); border:1px solid #333; border-radius:8px; padding:10px; font:inherit; }
+  textarea { min-height:90px; }
+  .toggle { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #222; }
+  .toggle.off { opacity:.45; }
+  .hint { font-size:.85rem; color:var(--muted); }
+  video { width:220px; border-radius:10px; background:#000; }
+  .status { padding:12px; border-radius:8px; background:#1c1c1c; margin-top:16px; white-space:pre-wrap; }
+  .step { color:var(--gold); font-size:.8rem; letter-spacing:.12em; text-transform:uppercase; }
+  .hidden { display:none; }
+  .warn { color:#f0b44c; }
+</style>
+</head>
+<body>
+<main>
+  <nav><a href="../">Home</a><a href="../privacy.html">Privacy</a><a href="../terms.html">Terms</a></nav>
+  <h1>OMB Creator Console</h1>
+  <p class="muted">Publish One Million Bucks videos to our own TikTok account. Runs only for the account owner.</p>
+
+  <section class="card" id="connect">
+    <div class="step">Step 1</div>
+    <h2>Connect TikTok</h2>
+    <div id="notConnected">
+      <p>Sign in with TikTok to let OMB Publisher upload and post videos to your account.</p>
+      <button class="btn" id="connectBtn">Continue with TikTok</button>
+    </div>
+    <div id="connected" class="row hidden">
+      <img class="avatar" id="avatar" alt="">
+      <div><strong id="name"></strong><div class="hint">Connected TikTok account</div></div>
+    </div>
+    <p id="helperMsg" class="hint"></p>
+  </section>
+
+  <section class="card hidden" id="compose">
+    <div class="step">Step 2</div>
+    <h2>Choose a video</h2>
+    <div class="row">
+      <video id="preview" controls muted playsinline></video>
+      <div style="flex:1;min-width:220px">
+        <label for="videoSel">Video</label>
+        <select id="videoSel"></select>
+        <label for="title">Caption</label>
+        <textarea id="title" maxlength="2200"></textarea>
+      </div>
+    </div>
+
+    <div class="step" style="margin-top:24px">Step 3</div>
+    <h2>Post settings</h2>
+    <p>Posting to <strong id="creatorName"></strong> <span class="hint" id="durationHint"></span></p>
+    <label for="privacy">Who can view this video</label>
+    <select id="privacy"><option value="" selected disabled>Select privacy</option></select>
+
+    <div class="toggle" id="tComment"><span>Allow comments</span><input type="checkbox" id="allowComment"></div>
+    <div class="toggle" id="tDuet"><span>Allow Duet</span><input type="checkbox" id="allowDuet"></div>
+    <div class="toggle" id="tStitch"><span>Allow Stitch</span><input type="checkbox" id="allowStitch"></div>
+
+    <div class="toggle"><span>Disclose video content<div class="hint">Turn on if this video promotes a brand, product or service.</div></span><input type="checkbox" id="disclose"></div>
+    <div id="discloseOpts" class="hidden">
+      <div class="toggle"><span>Your brand<div class="hint">Promoting yourself or your own business. Labeled "Promotional content".</div></span><input type="checkbox" id="ownBrand"></div>
+      <div class="toggle"><span>Branded content<div class="hint">Promoting another brand or a third party. Labeled "Paid partnership".</div></span><input type="checkbox" id="branded"></div>
+      <p class="hint warn" id="discloseWarn">Select at least one option to disclose.</p>
+    </div>
+    <div class="toggle"><span>AI-generated content<div class="hint">Adds TikTok's AI-generated label. Our videos use AI voice and visuals.</div></span><input type="checkbox" id="aigc" checked></div>
+
+    <p class="hint" id="consent">By posting, you agree to TikTok's <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener">Music Usage Confirmation</a>.</p>
+    <div class="row">
+      <button class="btn" id="postBtn" disabled>Post to TikTok</button>
+      <button class="btn alt" id="draftBtn">Send to TikTok drafts</button>
+    </div>
+    <div class="status hidden" id="status"></div>
+  </section>
+
+  <footer>One Million Bucks &middot; Videos are educational, not financial advice.</footer>
+</main>
+<script>
+const HELPER = "http://127.0.0.1:8765";
+const $ = id => document.getElementById(id);
+let creator = null;
+
+async function api(path, body) {
+  const opts = body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {};
+  const r = await fetch(HELPER + path, opts);
+  const data = await r.json();
+  if (!r.ok || data.error) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+
+async function start() {
+  let cfg;
+  try { cfg = await api("/config"); }
+  catch (e) { $("helperMsg").textContent = "The OMB Publisher helper is not running on this computer. Start it, then reload."; $("connectBtn").disabled = true; return; }
+  $("connectBtn").onclick = () => {
+    const state = crypto.randomUUID();
+    localStorage.setItem("omb_console_state", state);
+    const u = new URL("https://www.tiktok.com/v2/auth/authorize/");
+    u.search = new URLSearchParams({client_key: cfg.client_key, scope: cfg.scopes, response_type: "code",
+                                    redirect_uri: cfg.redirect_uri, state}).toString();
+    location.href = u.toString();
+  };
+  const q = new URLSearchParams(location.search);
+  if (q.get("code")) {
+    if (q.get("state") !== localStorage.getItem("omb_console_state")) { $("helperMsg").textContent = "Sign-in state did not match. Please try again."; return; }
+    history.replaceState(null, "", location.pathname);
+    try {
+      const res = await api("/exchange", {code: q.get("code")});
+      showUser(res.user);
+      await loadComposer();
+    } catch (e) { $("helperMsg").textContent = "Sign-in failed: " + e.message; }
+  }
+}
+
+function showUser(u) {
+  $("notConnected").classList.add("hidden");
+  $("connected").classList.remove("hidden");
+  $("name").textContent = u.display_name || "TikTok user";
+  if (u.avatar_url) $("avatar").src = u.avatar_url;
+}
+
+async function loadComposer() {
+  creator = await api("/creator");
+  $("compose").classList.remove("hidden");
+  $("creatorName").textContent = creator.creator_nickname || creator.creator_username || "your account";
+  if (creator.max_video_post_duration_sec) $("durationHint").textContent = "(videos up to " + creator.max_video_post_duration_sec + " s)";
+  for (const opt of creator.privacy_level_options || []) {
+    const o = document.createElement("option");
+    o.value = opt;
+    o.textContent = {PUBLIC_TO_EVERYONE:"Everyone", MUTUAL_FOLLOW_FRIENDS:"Friends", FOLLOWER_OF_CREATOR:"Followers", SELF_ONLY:"Only me"}[opt] || opt;
+    $("privacy").appendChild(o);
+  }
+  const lock = (row, box, disabled) => { if (disabled) { $(row).classList.add("off"); $(box).disabled = true; $(box).checked = false; } };
+  lock("tComment", "allowComment", creator.comment_disabled);
+  lock("tDuet", "allowDuet", creator.duet_disabled);
+  lock("tStitch", "allowStitch", creator.stitch_disabled);
+  const vids = (await api("/videos")).videos;
+  for (const v of vids) { const o = document.createElement("option"); o.value = v.id; o.textContent = v.title + " (" + v.mb + " MB)"; $("videoSel").appendChild(o); }
+  $("videoSel").onchange = pickVideo;
+  pickVideo();
+}
+
+function pickVideo() {
+  const sel = $("videoSel");
+  if (!sel.value) return;
+  $("preview").src = HELPER + "/video?id=" + encodeURIComponent(sel.value);
+  $("title").value = sel.options[sel.selectedIndex].text.replace(/ \([\d.]+ MB\)$/, "") + " #money #finance #onemillionbucks";
+}
+
+function validate() {
+  const disclose = $("disclose").checked;
+  $("discloseOpts").classList.toggle("hidden", !disclose);
+  const needOpt = disclose && !$("ownBrand").checked && !$("branded").checked;
+  $("discloseWarn").classList.toggle("hidden", !needOpt);
+  if ($("branded").checked) {
+    const pub = [...$("privacy").options].find(o => o.value === "SELF_ONLY");
+    if (pub) pub.disabled = true;
+    if ($("privacy").value === "SELF_ONLY") $("privacy").value = "";
+  } else { [...$("privacy").options].forEach(o => { if (o.value) o.disabled = false; }); }
+  $("consent").innerHTML = $("branded").checked
+    ? 'By posting, you agree to TikTok\'s <a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank" rel="noopener">Branded Content Policy</a> and <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener">Music Usage Confirmation</a>.'
+    : 'By posting, you agree to TikTok\'s <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noopener">Music Usage Confirmation</a>.';
+  $("postBtn").disabled = !$("privacy").value || needOpt;
+}
+["privacy","disclose","ownBrand","branded"].forEach(id => $(id).addEventListener("change", validate));
+
+async function submit(mode) {
+  const s = $("status");
+  s.classList.remove("hidden");
+  s.textContent = mode === "direct" ? "Uploading and posting to TikTok..." : "Uploading to your TikTok drafts...";
+  $("postBtn").disabled = $("draftBtn").disabled = true;
+  try {
+    const res = await api("/post", {video_id: $("videoSel").value, mode, title: $("title").value,
+      privacy_level: $("privacy").value, disable_comment: !$("allowComment").checked,
+      disable_duet: !$("allowDuet").checked, disable_stitch: !$("allowStitch").checked,
+      brand_content_toggle: $("branded").checked, brand_organic_toggle: $("ownBrand").checked, is_aigc: $("aigc").checked});
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 4000));
+      const st = await api("/status?publish_id=" + encodeURIComponent(res.publish_id));
+      s.textContent = "Status: " + st.status;
+      if (st.status === "PUBLISH_COMPLETE") { s.textContent = "Posted! It may take a few minutes to appear on your TikTok profile."; break; }
+      if (st.status === "SEND_TO_USER_INBOX") { s.textContent = "Sent! Open TikTok and check your inbox notification to edit and post the draft."; break; }
+      if (st.status === "FAILED") { s.textContent = "TikTok could not process the video: " + (st.fail_reason || "unknown"); break; }
+    }
+  } catch (e) { s.textContent = "Error: " + e.message; }
+  $("draftBtn").disabled = false; validate();
+}
+$("postBtn").onclick = () => submit("direct");
+$("draftBtn").onclick = () => submit("inbox");
+start();
+</script>
+</body>
+</html>
