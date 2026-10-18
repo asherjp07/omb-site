@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>OMB Controls</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  main { max-width: 520px; }
+  .big { display:block; width:100%; border:0; border-radius:14px; padding:20px; font-size:1.2rem; font-weight:800;
+         cursor:pointer; margin:14px 0 6px; }
+  .reel { background:linear-gradient(90deg,#b8902c,#f3d27a,#b8902c); color:#0b0b0b; }
+  .carousel { background:#1c1c1c; color:var(--gold); border:1px solid var(--gold); }
+  .big:disabled { opacity:.5; cursor:wait; }
+  .last { font-size:.85rem; color:var(--muted); min-height:1.2em; }
+  .msg { margin-top:18px; padding:14px; border-radius:10px; background:#1c1c1c; min-height:1.2em; }
+  .msg.ok { border-left:4px solid #3fb950; }
+  .msg.err { border-left:4px solid #f85149; }
+  input { width:100%; padding:14px; font-size:1.2rem; border-radius:10px; border:1px solid #333; background:#141414;
+          color:var(--text); letter-spacing:.3em; text-align:center; }
+  .row { display:flex; gap:10px; }
+  .row button { flex:none; }
+  .link { background:none; border:0; color:var(--gold); text-decoration:underline; cursor:pointer; font-size:.9rem; padding:0; }
+</style>
+</head>
+<body>
+<main>
+  <nav><a href="../">Home</a></nav>
+  <h1>Controls</h1>
+  <p class="muted">Post now if a scheduled reel or carousel did not start. Owner only.</p>
+
+  <section id="pinBox" class="card">
+    <label for="pin"><strong>Enter your PIN</strong> (remembered on this phone)</label>
+    <input id="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12">
+    <button class="big reel" id="savePin" style="margin-top:12px">Unlock</button>
+  </section>
+
+  <section id="controls" hidden>
+    <button class="big reel" data-workflow="reel">&#9654; Post reel now</button>
+    <div class="last" id="last-reel"></div>
+    <button class="big carousel" data-workflow="carousel">&#9654; Post carousel now</button>
+    <div class="last" id="last-carousel"></div>
+    <div class="msg" id="msg" hidden></div>
+    <p style="margin-top:24px"><button class="link" id="refresh">Refresh status</button>
+       &nbsp;&middot;&nbsp; <button class="link" id="forget">Forget PIN on this phone</button></p>
+  </section>
+  <footer>Each button posts at most once per slot: the daily limits still apply.</footer>
+</main>
+<script>
+  const API = "https://omb-funnel.onemillionbucks.workers.dev/control";
+  const $ = (id) => document.getElementById(id);
+  const store = { get() { try { return localStorage.getItem("omb_pin") || ""; } catch { return ""; } },
+                  set(v) { try { localStorage.setItem("omb_pin", v); } catch {} },
+                  clear() { try { localStorage.removeItem("omb_pin"); } catch {} } };
+  let pin = store.get();
+
+  async function call(path, body) {
+    const res = await fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ pin, ...body }) });
+    const data = await res.json().catch(() => ({ error: "Unexpected reply" }));
+    if (!res.ok) throw Object.assign(new Error(data.error || ("HTTP " + res.status)), { status: res.status });
+    return data;
+  }
+
+  function show(text, ok) {
+    const m = $("msg"); m.hidden = false; m.textContent = text; m.className = "msg " + (ok ? "ok" : "err");
+  }
+
+  function describe(run) {
+    if (!run) return "No runs yet.";
+    const when = new Date(run.created_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+    const how = run.event === "schedule" ? "scheduled" : "manual";
+    const state = run.status !== "completed" ? "running now" : (run.conclusion === "success" ? "done" : run.conclusion);
+    return `Last run: ${when} (${how}) - ${state}`;
+  }
+
+  async function refresh() {
+    try {
+      const s = await call("/status", {});
+      $("last-reel").textContent = describe(s.reel);
+      $("last-carousel").textContent = describe(s.carousel);
+    } catch (e) {
+      if (e.status === 401) return lock("That PIN is wrong.");
+      $("last-reel").textContent = $("last-carousel").textContent = "Status unavailable: " + e.message;
+    }
+  }
+
+  function unlock() { $("pinBox").hidden = true; $("controls").hidden = false; refresh(); }
+  function lock(reason) {
+    store.clear(); pin = ""; $("controls").hidden = true; $("pinBox").hidden = false;
+    if (reason) { $("pin").value = ""; $("pin").placeholder = reason; }
+  }
+
+  $("savePin").onclick = () => { pin = $("pin").value.trim(); if (!pin) return; store.set(pin); unlock(); };
+  $("pin").addEventListener("keydown", (e) => { if (e.key === "Enter") $("savePin").click(); });
+  $("forget").onclick = () => lock("");
+  $("refresh").onclick = refresh;
+  document.querySelectorAll("[data-workflow]").forEach((btn) => {
+    btn.onclick = async () => {
+      const what = btn.dataset.workflow;
+      if (!confirm(`Post the ${what} now?`)) return;
+      document.querySelectorAll("[data-workflow]").forEach((b) => (b.disabled = true));
+      show(`Starting the ${what}...`, true);
+      try {
+        const r = await call("/run", { workflow: what });
+        show(r.message + " You'll get a phone alert if it fails.", true);
+        setTimeout(refresh, 8000);
+      } catch (e) {
+        if (e.status === 401) return lock("That PIN is wrong.");
+        show("Could not start it: " + e.message, false);
+      } finally {
+        document.querySelectorAll("[data-workflow]").forEach((b) => (b.disabled = false));
+      }
+    };
+  });
+  if (pin) unlock();
+  // Homepage buttons link here with ?run=reel or ?run=carousel: go straight to that action.
+  const wanted = new URLSearchParams(location.search).get("run");
+  if (wanted) {
+    history.replaceState(null, "", location.pathname);
+    const go = () => document.querySelector(`[data-workflow="${wanted}"]`)?.click();
+    if (pin) setTimeout(go, 300);
+    else $("savePin").addEventListener("click", () => setTimeout(go, 300), { once: true });
+  }
+</script>
+</body>
+</html>
