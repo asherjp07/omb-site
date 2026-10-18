@@ -108,7 +108,7 @@ async function start() {
     localStorage.setItem("omb_console_state", state);
     const u = new URL("https://www.tiktok.com/v2/auth/authorize/");
     u.search = new URLSearchParams({client_key: cfg.client_key, scope: cfg.scopes, response_type: "code",
-                                    redirect_uri: cfg.redirect_uri, state}).toString();
+                                    redirect_uri: cfg.redirect_uri, state, disable_auto_auth: "1"}).toString();
     location.href = u.toString();
   };
   const q = new URLSearchParams(location.search);
