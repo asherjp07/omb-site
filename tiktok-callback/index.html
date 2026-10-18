@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Authorisation code</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0b0b0b; color: #f5f5f5; margin: 0; padding: 40px 16px; }
+  main { max-width: 640px; margin: 0 auto; }
+  code { display: block; background: #1c1c1c; color: #d4af37; padding: 12px; word-break: break-all; border-radius: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>One Million Bucks AutoPilot</h1>
+  <p>Copy this code into the terminal running <em>scripts/tiktok_oauth.py</em>. It expires within minutes and works only once.</p>
+  <p>Code:</p><code id="code">(none)</code>
+  <p>State (must match the terminal):</p><code id="state">(none)</code>
+  <p id="error"></p>
+</main>
+<script>
+  // Static page: nothing is sent anywhere. It only displays the query parameters.
+  const q = new URLSearchParams(location.search);
+  document.getElementById("code").textContent = q.get("code") || "(none)";
+  document.getElementById("state").textContent = q.get("state") || "(none)";
+  if (q.get("error")) document.getElementById("error").textContent = "Error: " + q.get("error") + " " + (q.get("error_description") || "");
+</script>
+</body>
+</html>
